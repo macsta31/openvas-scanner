@@ -323,6 +323,9 @@ ipc_data_destroy (struct ipc_data *data)
     case IPC_DT_USER_AGENT:
       ipc_user_agent_destroy (data->ipc_user_agent);
       break;
+    case IPC_DT_LSC:
+      ipc_lsc_destroy (data->ipc_lsc);
+      break;
     case IPC_DT_ERROR:
       return;
     }
@@ -345,6 +348,7 @@ ipc_data_to_json (struct ipc_data *data)
   gchar *json_str;
   ipc_hostname_t *hn = NULL;
   ipc_user_agent_t *ua = NULL;
+  ipc_lsc_t *lsc = NULL;
   enum ipc_data_type type = IPC_DT_ERROR;
 
   if (data == NULL)
@@ -373,6 +377,14 @@ ipc_data_to_json (struct ipc_data *data)
       ua = data->ipc_user_agent;
       json_builder_set_member_name (builder, "user-agent");
       builder = json_builder_add_string_value (builder, ua->user_agent);
+      break;
+
+    case IPC_DT_LSC:
+      lsc = data->ipc_lsc;
+      json_builder_set_member_name (builder, "package_list");
+      builder = json_builder_add_string_value (builder, lsc->package_list);
+      json_builder_set_member_name (builder, "os_release");
+      builder = json_builder_add_string_value (builder, lsc->os_release);
       break;
 
     default:
@@ -414,6 +426,7 @@ ipc_data_from_json (const char *json, size_t len)
   struct ipc_data *ret = NULL;
   ipc_user_agent_t *ua;
   ipc_hostname_t *hn;
+  ipc_lsc_t *lsc;
 
   enum ipc_data_type type = IPC_DT_ERROR;
 
@@ -473,6 +486,26 @@ ipc_data_from_json (const char *json, size_t len)
       ua->user_agent_len = strlen (ua->user_agent);
       json_reader_end_member (reader);
       ret->ipc_user_agent = ua;
+      break;
+
+    case IPC_DT_LSC:
+      if ((lsc = calloc (1, sizeof (*lsc))) == NULL)
+        goto cleanup;
+      if (!json_reader_read_member (reader, "package_list"))
+        {
+          goto cleanup;
+        }
+      lsc->package_list = g_strdup (json_reader_get_string_value (reader));
+      lsc->package_list_len = strlen (lsc->package_list);
+      json_reader_end_member (reader);
+      if (!json_reader_read_member (reader, "os_release"))
+        {
+          goto cleanup;
+        }
+      lsc->os_release = g_strdup (json_reader_get_string_value (reader));
+      lsc->os_release_len = strlen (lsc->os_release);
+      json_reader_end_member (reader);
+      ret->ipc_lsc = lsc;
       break;
     }
 
