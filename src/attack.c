@@ -320,7 +320,7 @@ append_vhost (const char *vhost, const char *source)
 }
 
 static void
-read_ipc (struct ipc_context *ctx)
+read_ipc (struct ipc_context *ctx, struct attack_start_args *args)
 {
   char *result;
   ipc_data_t *idata;
@@ -356,6 +356,33 @@ read_ipc (struct ipc_context *ctx)
                            __func__, old_ua,
                            ipc_get_user_agent_from_data (idata));
                   g_free (old_ua);
+                }
+              break;
+            case IPC_DT_LSC:
+              if (!scan_is_stopped () && prefs_get_bool ("table_driven_lsc")
+                  && prefs_get_bool ("mqtt_enabled"))
+                {
+                  struct in6_addr hostip;
+                  char ip_str[INET6_ADDRSTRLEN];
+
+                  gvm_host_get_addr6 (args->host, &hostip);
+                  addr6_to_str (&hostip, ip_str);
+
+                  g_message ("Running LSC via Notus for %s", ip_str);
+                  if (run_table_driven_lsc (args->globals->scan_id,
+                                            ip_str, NULL,
+                                            ipc_get_lsc_package_list_from_data (idata),
+                                            ipc_get_lsc_os_release_from_data (idata))
+                      )
+                    {
+                      char buffer[2048];
+                      snprintf (
+                                buffer, sizeof (buffer),
+                                "ERRMSG|||%s||| ||| ||| ||| Unable to launch table driven lsc",
+                                ip_str);
+                      kb_check_push_str (args->main_kb, "internal/results", buffer);
+                      g_warning ("%s: Unable to launch table driven LSC", __func__);
+                    }
                 }
               break;
             }
@@ -450,7 +477,7 @@ launch_plugin (struct scan_globals *globals, struct scheduler_plugin *plugin,
     {
       for (int i = 0; i < procs_get_ipc_contexts ()->len; i++)
         {
-          read_ipc (&procs_get_ipc_contexts ()->ctxs[i]);
+          read_ipc (&procs_get_ipc_contexts ()->ctxs[i], args);
         }
     }
   launch_error = 0;
@@ -598,22 +625,6 @@ attack_host (struct scan_globals *globals, struct in6_addr *ip,
         /* 50 milliseconds. */
         usleep (50000);
       pluginlaunch_wait_for_free_process (args->main_kb, args->host_kb);
-    }
-
-  if (!scan_is_stopped () && prefs_get_bool ("table_driven_lsc")
-      && prefs_get_bool ("mqtt_enabled"))
-    {
-      g_message ("Running LSC via Notus for %s", ip_str);
-      if (run_table_driven_lsc (globals->scan_id, args->host_kb, ip_str, NULL))
-        {
-          char buffer[2048];
-          snprintf (
-            buffer, sizeof (buffer),
-            "ERRMSG|||%s||| ||| ||| ||| Unable to launch table driven lsc",
-            ip_str);
-          kb_check_push_str (args->main_kb, "internal/results", buffer);
-          g_warning ("%s: Unable to launch table driven LSC", __func__);
-        }
     }
 
   pluginlaunch_wait (args->main_kb, args->host_kb);
