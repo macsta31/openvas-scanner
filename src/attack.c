@@ -30,8 +30,8 @@
 #include "../misc/nvt_categories.h" /* for ACT_INIT */
 #include "../misc/pcap_openvas.h"   /* for v6_is_local_ip */
 #include "../misc/plugutils.h"
-#include "../misc/user_agent.h"       /* for user_agent_set */
 #include "../misc/table_driven_lsc.h" /*for run_table_driven_lsc */
+#include "../misc/user_agent.h"       /* for user_agent_set */
 #include "../nasl/nasl_debug.h"       /* for nasl_*_filename */
 #include "hosts.h"
 #include "pluginlaunch.h"
@@ -320,73 +320,93 @@ append_vhost (const char *vhost, const char *source)
 }
 
 static void
-read_ipc (struct ipc_context *ctx, struct attack_start_args *args)
+read_ipc (struct attack_start_args *args)
 {
-  char *result;
-  ipc_data_t *idata;
+  static int count = 0;
+  g_message ("ingreso %d", ++count);
+  const struct ipc_contexts *ipc_ctxs = NULL;
 
-  while ((result = ipc_retrieve (ctx, IPC_MAIN)) != NULL)
+  ipc_ctxs = procs_get_ipc_contexts ();
+  if (ipc_ctxs != NULL)
     {
-      if ((idata = ipc_data_from_json (result, strlen (result))) != NULL)
+      for (int i = 0; i < ipc_ctxs->len; i++)
         {
-          switch (ipc_get_data_type_from_data (idata))
+          struct ipc_context *ctx = NULL;
+          char *result;
+          ipc_data_t *idata;
+
+          ctx = &ipc_ctxs->ctxs[i];
+
+          while ((result = ipc_retrieve (ctx, IPC_MAIN)) != NULL)
             {
-            case IPC_DT_ERROR:
-              g_warning ("%s: Unknown data type.", __func__);
-              break;
-            case IPC_DT_HOSTNAME:
-              if (ipc_get_hostname_from_data (idata) == NULL)
-                g_warning ("%s: ihost data is NULL ignoring new vhost",
-                           __func__);
-              else
-                append_vhost (ipc_get_hostname_from_data (idata),
-                              ipc_get_hostname_source_from_data (idata));
-              break;
-            case IPC_DT_USER_AGENT:
-              if (ipc_get_user_agent_from_data (idata) == NULL)
-                g_warning (
-                  "%s: iuser_agent data is NULL, ignoring new user agent",
-                  __func__);
-              else
+              if ((idata = ipc_data_from_json (result, strlen (result)))
+                  != NULL)
                 {
-                  gchar *old_ua = NULL;
-                  old_ua =
-                    user_agent_set (ipc_get_user_agent_from_data (idata));
-                  g_debug ("%s: The User-Agent %s has been overwritten with %s",
-                           __func__, old_ua,
-                           ipc_get_user_agent_from_data (idata));
-                  g_free (old_ua);
-                }
-              break;
-            case IPC_DT_LSC:
-              if (!scan_is_stopped () && prefs_get_bool ("table_driven_lsc")
-                  && prefs_get_bool ("mqtt_enabled"))
-                {
-                  struct in6_addr hostip;
-                  char ip_str[INET6_ADDRSTRLEN];
-
-                  gvm_host_get_addr6 (args->host, &hostip);
-                  addr6_to_str (&hostip, ip_str);
-
-                  g_message ("Running LSC via Notus for %s", ip_str);
-                  if (run_table_driven_lsc (args->globals->scan_id,
-                                            ip_str, NULL,
-                                            ipc_get_lsc_package_list_from_data (idata),
-                                            ipc_get_lsc_os_release_from_data (idata))
-                      )
+                  switch (ipc_get_data_type_from_data (idata))
                     {
-                      char buffer[2048];
-                      snprintf (
-                                buffer, sizeof (buffer),
-                                "ERRMSG|||%s||| ||| ||| ||| Unable to launch table driven lsc",
-                                ip_str);
-                      kb_check_push_str (args->main_kb, "internal/results", buffer);
-                      g_warning ("%s: Unable to launch table driven LSC", __func__);
+                    case IPC_DT_ERROR:
+                      g_warning ("%s: Unknown data type.", __func__);
+                      break;
+                    case IPC_DT_HOSTNAME:
+                      if (ipc_get_hostname_from_data (idata) == NULL)
+                        g_warning ("%s: ihost data is NULL ignoring new vhost",
+                                   __func__);
+                      else
+                        append_vhost (
+                          ipc_get_hostname_from_data (idata),
+                          ipc_get_hostname_source_from_data (idata));
+                      break;
+                    case IPC_DT_USER_AGENT:
+                      if (ipc_get_user_agent_from_data (idata) == NULL)
+                        g_warning ("%s: iuser_agent data is NULL, ignoring new "
+                                   "user agent",
+                                   __func__);
+                      else
+                        {
+                          gchar *old_ua = NULL;
+                          old_ua = user_agent_set (
+                            ipc_get_user_agent_from_data (idata));
+                          g_debug ("%s: The User-Agent %s has been overwritten "
+                                   "with %s",
+                                   __func__, old_ua,
+                                   ipc_get_user_agent_from_data (idata));
+                          g_free (old_ua);
+                        }
+                      break;
+                    case IPC_DT_LSC:
+                      if (!scan_is_stopped ()
+                          && prefs_get_bool ("table_driven_lsc")
+                          && prefs_get_bool ("mqtt_enabled"))
+                        {
+                          struct in6_addr hostip;
+                          char ip_str[INET6_ADDRSTRLEN];
+
+                          gvm_host_get_addr6 (args->host, &hostip);
+                          addr6_to_str (&hostip, ip_str);
+
+                          g_message ("Running LSC via Notus for %s", ip_str);
+                          if (run_table_driven_lsc (
+                                args->globals->scan_id, ip_str, NULL,
+                                ipc_get_lsc_package_list_from_data (idata),
+                                ipc_get_lsc_os_release_from_data (idata)))
+                            {
+                              char buffer[2048];
+                              snprintf (buffer, sizeof (buffer),
+                                        "ERRMSG|||%s||| ||| ||| ||| Unable to "
+                                        "launch table driven lsc",
+                                        ip_str);
+                              kb_check_push_str (args->main_kb,
+                                                 "internal/results", buffer);
+                              g_warning (
+                                "%s: Unable to launch table driven LSC",
+                                __func__);
+                            }
+                        }
+                      break;
                     }
+                  ipc_data_destroy (idata);
                 }
-              break;
             }
-          ipc_data_destroy (idata);
         }
     }
 }
@@ -472,14 +492,10 @@ launch_plugin (struct scan_globals *globals, struct scheduler_plugin *plugin,
       goto finish_launch_plugin;
     }
 
-  /* Update vhosts list and start the plugin */
-  if (procs_get_ipc_contexts () != NULL)
-    {
-      for (int i = 0; i < procs_get_ipc_contexts ()->len; i++)
-        {
-          read_ipc (&procs_get_ipc_contexts ()->ctxs[i], args);
-        }
-    }
+  /* Read the pipes */
+  read_ipc (args);
+
+  /* Start the plugin */
   launch_error = 0;
   pid = plugin_launch (globals, plugin, ip, vhosts, args->host_kb,
                        args->main_kb, nvti, &launch_error);
