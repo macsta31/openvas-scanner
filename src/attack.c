@@ -322,8 +322,6 @@ append_vhost (const char *vhost, const char *source)
 static void
 read_ipc (struct attack_start_args *args)
 {
-  static int count = 0;
-  g_message ("ingreso %d", ++count);
   const struct ipc_contexts *ipc_ctxs = NULL;
 
   ipc_ctxs = procs_get_ipc_contexts ();
@@ -379,16 +377,30 @@ read_ipc (struct attack_start_args *args)
                           && prefs_get_bool ("mqtt_enabled"))
                         {
                           struct in6_addr hostip;
-                          char ip_str[INET6_ADDRSTRLEN];
+                          gchar ip_str[INET6_ADDRSTRLEN];
+                          gchar *package_list;
+                          gchar *os_release;
+                          kb_t hostkb = NULL;
+
+                          if (!ipc_get_lsc_data_ready_flag (idata))
+                            return;
+
+                          hostkb = args->host_kb;
+                          /* Get the OS release. TODO: have a list with
+                           * supported OS. */
+                          os_release =
+                            kb_item_get_str (hostkb, "ssh/login/release_notus");
+                          /* Get the package list. Currently only rpm support */
+                          package_list = kb_item_get_str (
+                            hostkb, "ssh/login/package_list_notus");
 
                           gvm_host_get_addr6 (args->host, &hostip);
                           addr6_to_str (&hostip, ip_str);
 
                           g_message ("Running LSC via Notus for %s", ip_str);
-                          if (run_table_driven_lsc (
-                                args->globals->scan_id, ip_str, NULL,
-                                ipc_get_lsc_package_list_from_data (idata),
-                                ipc_get_lsc_os_release_from_data (idata)))
+                          if (run_table_driven_lsc (args->globals->scan_id,
+                                                    ip_str, NULL, package_list,
+                                                    os_release))
                             {
                               char buffer[2048];
                               snprintf (buffer, sizeof (buffer),
@@ -401,6 +413,8 @@ read_ipc (struct attack_start_args *args)
                                 "%s: Unable to launch table driven LSC",
                                 __func__);
                             }
+                          g_free (os_release);
+                          g_free (package_list);
                         }
                       break;
                     }
