@@ -17,6 +17,8 @@ use crate::{
     context::Context, error::FunctionErrorKind, ContextType, NaslFunction, NaslValue, Register,
 };
 
+use super::hostname::get_host_ip;
+
 /// Hardware type ethernet
 const ARPHRD_ETHER: u16 = 0x0001;
 /// Protocol type IP
@@ -425,20 +427,6 @@ fn ipstr2ipaddr(ip_addr: &str) -> Result<IpAddr, FunctionErrorKind> {
             "Invalid IP address".to_string(),
             Some(NaslValue::Null),
         )),
-    }
-}
-
-/// Return the target's IP address or 127.0.0.1 if not set.
-fn get_host_ip<K>(context: &Context<K>) -> Result<IpAddr, FunctionErrorKind> {
-    let default_ip = "127.0.0.1";
-    let r_sock_addr = match context.target() {
-        x if !x.is_empty() => IpAddr::from_str(x),
-        _ => IpAddr::from_str(default_ip),
-    };
-
-    match r_sock_addr {
-        Ok(x) => Ok(x),
-        Err(e) => Err(("IP address", e.to_string().as_str()).into()),
     }
 }
 

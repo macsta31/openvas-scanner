@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-use std::str;
+use std::{str, net::IpAddr, str::FromStr};
 
 use crate::{
     error::FunctionErrorKind, lookup_keys::TARGET, Context, NaslFunction, NaslValue, Register,
@@ -54,11 +54,37 @@ pub fn get_host_name<K>(
     resolve_hostname(register).map(NaslValue::String)
 }
 
+/// Return the target's IP address as IpAddr.
+pub fn get_host_ip<K>(
+    context: &Context<K>
+) -> Result<IpAddr, FunctionErrorKind> {
+    let default_ip = "127.0.0.1";
+    let r_sock_addr = match context.target() {
+        x if !x.is_empty() => IpAddr::from_str(x),
+        _ => IpAddr::from_str(default_ip),
+    };
+
+    match r_sock_addr {
+        Ok(x) => Ok(x),
+        Err(e) => Err(("IP address", e.to_string().as_str()).into()),
+    }
+}
+
+/// Return the target's IP address or 127.0.0.1 if not set.
+fn nasl_get_host_ip<K>(
+    _register: &Register,
+    context: &Context<K>
+) -> Result<NaslValue, FunctionErrorKind> {
+    let ip = get_host_ip(context)?;
+    Ok(NaslValue::String(ip.to_string()))
+}
+
 /// Returns found function for key or None when not found
 pub fn lookup<K>(key: &str) -> Option<NaslFunction<K>> {
     match key {
         "get_host_name" => Some(get_host_name),
         "get_host_names" => Some(get_host_names),
+        "get_host_ip" => Some(nasl_get_host_ip),
         _ => None,
     }
 }
