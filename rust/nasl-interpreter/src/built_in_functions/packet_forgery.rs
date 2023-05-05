@@ -223,9 +223,39 @@ fn get_ip_element<K>(
 
 /// Receive a list of IP packets and print them in a readable format in the screen.
 fn dump_ip_packet<K>(
-    _register: &Register,
+    register: &Register,
     _configs: &Context<K>,
 ) -> Result<NaslValue, FunctionErrorKind> {
+    let positional = register.positional();
+    if positional.is_empty() {
+        return Ok(NaslValue::Null);
+    }
+
+    for ip in positional.iter() {
+        match ip {
+            NaslValue::Data(data) => {
+                let pkt = packet::ipv4::Ipv4Packet::new(data).unwrap();
+                println!("------\n");
+                println!("\tip_hl  : {:?}", pkt.get_header_length());
+                println!("\tip_v   : {:?}", pkt.get_version());
+                println!("\tip_tos : {:?}", pkt.get_dscp());
+                println!("\tip_len : {:?}", pkt.get_total_length());
+                println!("\tip_id  : {:?}", pkt.get_identification());
+                println!("\tip_off : {:?}", pkt.get_fragment_offset());
+                println!("\tip_ttl : {:?}", pkt.get_ttl());
+                // TODO: match pkt.get_next_level_protocol()
+                println!("\tip_sum  : {:?}", pkt.get_checksum());
+                println!("\tip_src : {:?}", pkt.get_source().to_string());
+                println!("\tip_dst : {:?}", pkt.get_destination().to_string());
+            }
+            _ => {
+                return Err(FunctionErrorKind::WrongArgument(
+                    "valid ip packet".to_string(),
+                ));
+            }
+        }
+    }
+
     Ok(NaslValue::Null)
 }
 
