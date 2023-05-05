@@ -13,6 +13,7 @@ use std::{
 
 use pcap::{Address, Capture, Device};
 
+use crate::helper::ipstr2ipaddr;
 use crate::{
     context::Context, error::FunctionErrorKind, ContextType, NaslFunction, NaslValue, Register,
 };
@@ -417,16 +418,6 @@ fn send_frame(
             let frame = recv_frame(&mut capture_dev, "")?;
             Ok(Some(frame))
         }
-    }
-}
-
-fn ipstr2ipaddr(ip_addr: &str) -> Result<IpAddr, FunctionErrorKind> {
-    match IpAddr::from_str(ip_addr) {
-        Ok(ip) => Ok(ip),
-        Err(_) => Err(FunctionErrorKind::Diagnostic(
-            "Invalid IP address".to_string(),
-            Some(NaslValue::Null),
-        )),
     }
 }
 

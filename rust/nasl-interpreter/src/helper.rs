@@ -2,9 +2,9 @@
 //
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-use std::{fmt::Write, num::ParseIntError};
+use std::{fmt::Write, net::IpAddr, num::ParseIntError, str::FromStr};
 
-use crate::error::FunctionErrorKind;
+use crate::{error::FunctionErrorKind, NaslValue};
 
 pub fn decode_hex(s: &str) -> Result<Vec<u8>, ParseIntError> {
     (0..s.len())
@@ -19,4 +19,15 @@ pub fn encode_hex(bytes: &[u8]) -> Result<String, FunctionErrorKind> {
         write!(&mut s, "{:02x}", b)?;
     }
     Ok(s)
+}
+
+/// Convert a string in a IpAddr
+pub fn ipstr2ipaddr(ip_addr: &str) -> Result<IpAddr, FunctionErrorKind> {
+    match IpAddr::from_str(ip_addr) {
+        Ok(ip) => Ok(ip),
+        Err(_) => Err(FunctionErrorKind::Diagnostic(
+            "Invalid IP address".to_string(),
+            Some(NaslValue::Null),
+        )),
+    }
 }
