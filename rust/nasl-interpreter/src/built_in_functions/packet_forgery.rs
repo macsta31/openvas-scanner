@@ -4,7 +4,31 @@
 
 //! Defines NASL packet forgery functions
 
-use crate::{Context, FunctionErrorKind, NaslFunction, NaslValue, Register};
+use std::net::Ipv4Addr;
+
+use crate::{Context, ContextType, FunctionErrorKind, NaslFunction, NaslValue, Register};
+use pnet::packet::{self, ip::IpNextHeaderProtocol, ipv4::checksum};
+
+use super::{hostname::get_host_ip, misc::random_impl};
+
+
+/// print the raw packet
+pub fn display_packet(vector: &[u8]) {
+    let mut s: String = "".to_string();
+    let mut count = 0;
+
+    for e in vector {
+        s.push_str(&format!("{:02x}", &e));
+        count += 1;
+        if count % 2 == 0 {
+            s.push(' ');
+        }
+        if count % 16 == 0 {
+            s.push('\n');
+        }
+    }
+    println!("{}", s);
+}
 
 /// Forge an IP datagram inside the block of data. It takes following arguments:
 ///  
@@ -23,10 +47,133 @@ use crate::{Context, FunctionErrorKind, NaslFunction, NaslValue, Register};
 ///
 /// Returns the IP datagram or NULL on error.
 fn forge_ip_packet<K>(
-    _register: &Register,
-    _configs: &Context<K>,
+    register: &Register,
+    configs: &Context<K>,
 ) -> Result<NaslValue, FunctionErrorKind> {
-    Ok(NaslValue::Null)
+    let dst_addr = get_host_ip(configs)?;
+
+    if dst_addr.is_ipv6() {
+        return Err(FunctionErrorKind::Diagnostic(
+            "forge_ip_packet: No valid dst_addr could be determined via call to get_host_ip()"
+                .to_string(),
+            Some(NaslValue::Null),
+        ));
+    }
+
+    let data = match register.named("data") {
+        Some(ContextType::Value(NaslValue::Data(d))) => d.clone(),
+        Some(ContextType::Value(NaslValue::String(d))) => d.as_bytes().to_vec(),
+        Some(ContextType::Value(NaslValue::Number(d))) => d.to_be_bytes().to_vec(),
+        _ => Vec::<u8>::new(),
+    };
+
+    let total_length = 20 + data.len();
+    let mut buf = vec![0; total_length];
+    let mut pkt = packet::ipv4::MutableIpv4Packet::new(&mut buf).unwrap();
+    pkt.set_total_length(total_length as u16);
+
+    if !data.is_empty() {
+        pkt.set_payload(&data);
+    }
+
+    let ip_hl = match register.named("ip_hl") {
+        Some(ContextType::Value(NaslValue::Number(x))) => *x as u8,
+        _ => 5_u8,
+    };
+    pkt.set_header_length(ip_hl);
+
+    let ip_v = match register.named("ip_v") {
+        Some(ContextType::Value(NaslValue::Number(x))) => *x as u8,
+        _ => 4_u8,
+    };
+    pkt.set_version(ip_v);
+
+    let ip_tos = match register.named("ip_tos") {
+        Some(ContextType::Value(NaslValue::Number(x))) => *x as u8,
+        _ => 0_u8,
+    };
+    pkt.set_dscp(ip_tos);
+
+    let ip_ttl = match register.named("ip_ttl") {
+        Some(ContextType::Value(NaslValue::Number(x))) => *x as u8,
+        _ => 0_u8,
+    };
+    pkt.set_ttl(ip_ttl);
+
+    let ip_id = match register.named("ip_id") {
+        Some(ContextType::Value(NaslValue::Number(x))) => *x as u16,
+        _ => random_impl()? as u16,
+    };
+    pkt.set_identification(ip_id.to_be());
+
+    let ip_off = match register.named("ip_off") {
+        Some(ContextType::Value(NaslValue::Number(x))) => *x as u16,
+        _ => 0_u16,
+    };
+    pkt.set_fragment_offset(ip_off);
+
+    let ip_p = match register.named("ip_p") {
+        Some(ContextType::Value(NaslValue::Number(x))) => *x as u8,
+        _ => 0_u8,
+    };
+    pkt.set_next_level_protocol(IpNextHeaderProtocol::new(ip_p));
+
+    match register.named("ip_src") {
+        Some(ContextType::Value(NaslValue::String(x))) => {
+            match x.parse::<Ipv4Addr>() {
+                Ok(ip) => {
+                    pkt.set_source(ip);
+                }
+                Err(e) => {
+                    return Err(FunctionErrorKind::Diagnostic(
+                        format!("forge_ip_packet invalid ip_src: {}", e),
+                        Some(NaslValue::Null),
+                    ));
+                }
+            };
+            x.to_string()
+        }
+        _ => String::new(),
+    };
+
+    match register.named("ip_dst") {
+        Some(ContextType::Value(NaslValue::String(x))) => {
+            match x.parse::<Ipv4Addr>() {
+                Ok(ip) => {
+                    pkt.set_destination(ip);
+                }
+                Err(e) => {
+                    return Err(FunctionErrorKind::Diagnostic(
+                        format!("forge_ip_packet invalid ip_dst: {}", e),
+                        Some(NaslValue::Null),
+                    ));
+                }
+            };
+            x.to_string()
+        }
+        _ => {
+            match dst_addr.to_string().parse::<Ipv4Addr>() {
+                Ok(ip) => {
+                    pkt.set_destination(ip);
+                }
+                Err(e) => {
+                    return Err(FunctionErrorKind::Diagnostic(
+                        format!("forge_ip_packet invalid ip: {}", e),
+                        Some(NaslValue::Null),
+                    ));
+                }
+            };
+            dst_addr.to_string()
+        }
+    };
+
+    let ip_sum = match register.named("ip_sum") {
+        Some(ContextType::Value(NaslValue::Number(x))) => (*x as u16).to_be(),
+        _ => checksum(&pkt.to_immutable()),
+    };
+    pkt.set_checksum(ip_sum);
+
+    Ok(NaslValue::Data(buf))
 }
 
 /// Set element from a IP datagram. Its arguments are:
@@ -348,7 +495,7 @@ fn nasl_send_packet<K>(
     Ok(NaslValue::Null)
 }
 
-/// This function is the same as **[send_capture(3)](send_capture.md)**.
+/// This function is the same as send_capture().
 ///  
 /// - interface: network interface name, by default NASL will try to find the best one
 /// - pcap_filter: BPF filter, by default it listens to everything
@@ -360,7 +507,7 @@ fn nasl_pcap_next<K>(
     Ok(NaslValue::Null)
 }
 
-/// This function is the same as **[pcap_next(3)](pcap_next.md)**.
+/// Read the next packet.
 ///  
 /// - interface: network interface name, by default NASL will try to find the best one
 /// - pcap_filter: BPF filter, by default it listens to everything
