@@ -9,8 +9,13 @@ ip_packet = forge_ip_packet(ip_v : 4,
                      ip_off : 0,
                      ip_src : 192.168.0.1,
                      ip_dst : 192.168.0.12);
-
 dump_ip_packet (ip_packet);
+
+ip_packet = set_ip_elements(ip_packet, ip_ttl: 127, ip_src: 192.168.0.10);
+dump_ip_packet (ip_packet);
+elem = get_ip_element(ip_packet, element: "ip_ttl");
+display(elem);
+
 
 tcp_packet = forge_tcp_packet(ip:       ip_packet,
                               th_sport: 5080,

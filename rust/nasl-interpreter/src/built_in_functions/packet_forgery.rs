@@ -299,10 +299,50 @@ fn set_ip_elements<K>(
 /// - ip_src
 /// - ip_dst
 fn get_ip_element<K>(
-    _register: &Register,
+    register: &Register,
     _configs: &Context<K>,
 ) -> Result<NaslValue, FunctionErrorKind> {
-    Ok(NaslValue::Null)
+    let positional = register.positional();
+    if positional.is_empty() {
+        return Err(FunctionErrorKind::Diagnostic(
+            format!("set_ip_element: missing <ip> field"),
+            Some(NaslValue::Null),
+        ));
+    }
+    let buf = match &positional[0] {
+        NaslValue::Data(d) => d.clone(),
+        _ => {
+            return Err(FunctionErrorKind::Diagnostic(
+                format!("set_ip_element: missing <ip> field"),
+                Some(NaslValue::Null),
+            ));
+        }
+    };
+
+    let pkt = packet::ipv4::Ipv4Packet::new(&buf).unwrap();
+
+    match register.named("element") {
+        Some(ContextType::Value(NaslValue::String(e))) => match e.as_str() {
+            "ip_v" => return Ok(NaslValue::Number(pkt.get_version() as i64)),
+            "ip_id" => return Ok(NaslValue::Number(pkt.get_identification() as i64)),
+            "ip_hl" => return Ok(NaslValue::Number(pkt.get_header_length() as i64)),
+            "ip_tos" => return Ok(NaslValue::Number(pkt.get_dscp() as i64)),
+            "ip_len" => return Ok(NaslValue::Number(pkt.get_total_length() as i64)),
+            "ip_off" => return Ok(NaslValue::Number(pkt.get_fragment_offset() as i64)),
+            "ip_ttl" => return Ok(NaslValue::Number(pkt.get_ttl() as i64)),
+            "ip_p" => return Ok(NaslValue::Number(pkt.get_next_level_protocol().0 as i64)),
+            "ip_sum" => return Ok(NaslValue::Number(pkt.get_checksum() as i64)),
+            "ip_src" => return Ok(NaslValue::String(pkt.get_source().to_string())),
+            "ip_dst" => return Ok(NaslValue::String(pkt.get_destination().to_string())),
+            _ => return Ok(NaslValue::Null),
+        },
+        _ => {
+            return Err(FunctionErrorKind::Diagnostic(
+                format!("set_ip_element: missing <ip> field"),
+                Some(NaslValue::Null),
+            ));
+        }
+    };
 }
 
 /// Receive a list of IP packets and print them in a readable format in the screen.
@@ -695,5 +735,35 @@ mod tests {
                 69, 0, 0, 20, 210, 4, 0, 0, 255, 6, 104, 129, 192, 168, 0, 1, 192, 168, 0, 12
             ])))
         );
+    }
+
+    #[test]
+    fn modify_elements() {
+        let code = r###"
+        ip_packet = forge_ip_packet(ip_v : 4,
+                     ip_hl : 5,
+                     ip_tos : 0,
+                     ip_len : 20,
+                     ip_id : 1234,
+                     ip_p : 0x06,
+                     ip_ttl : 255,
+                     ip_off : 0,
+                     ip_src : 192.168.0.1,
+                     ip_dst : 192.168.0.12);
+
+        elem = get_ip_element(ip_packet, element: "ip_ttl");
+        ip_packet = set_ip_elements(ip_packet, ip_ttl: 127, ip_src: 192.168.0.10);
+        elem = get_ip_element(ip_packet, element: "ip_ttl");
+        "###;
+        let mut register = Register::default();
+        let binding = DefaultContext::default();
+        let context = binding.as_context();
+        let mut interpreter = Interpreter::new(&mut register, &context);
+        let mut parser =
+            parse(code).map(|x| interpreter.resolve(&x.expect("no parse error expected")));
+        parser.next();
+        assert_eq!(parser.next(), Some(Ok(NaslValue::Number(255))));
+        parser.next();
+        assert_eq!(parser.next(), Some(Ok(NaslValue::Number(127))));
     }
 }
