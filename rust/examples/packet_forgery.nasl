@@ -2,13 +2,15 @@ ip_packet = forge_ip_packet(ip_v : 4,
                      ip_hl : 5,
                      ip_tos : 0,
                      ip_len : 20,
-                     ip_id : 0xFEAF,
-                     ip_p : IPPROTO_TCP,
+                     ip_id : rand(),
+#                     ip_p : IPPROTO_TCP, # No implemented
+                     ip_p : 0x06,
                      ip_ttl : 255,
                      ip_off : 0,
                      ip_src : 192.168.0.1,
                      ip_dst : 192.168.0.12);
 
+dump_ip_packet (ip_packet);
 
 tcp_packet = forge_tcp_packet(ip:       ip_packet,
                               th_sport: 5080,
@@ -23,3 +25,4 @@ tcp_packet = forge_tcp_packet(ip:       ip_packet,
                               th_urp:   0);
 
 dump_tcp_packet (ip_packet);
+
