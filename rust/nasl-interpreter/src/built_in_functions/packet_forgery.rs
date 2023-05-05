@@ -194,16 +194,8 @@ fn set_ip_elements<K>(
     register: &Register,
     _configs: &Context<K>,
 ) -> Result<NaslValue, FunctionErrorKind> {
-    let positional = register.positional();
-    if positional.is_empty() {
-        return Err(FunctionErrorKind::Diagnostic(
-            format!("set_ip_element: missing <ip> field"),
-            Some(NaslValue::Null),
-        ));
-    }
-
-    let mut buf = match &positional[0] {
-        NaslValue::Data(d) => d.clone(),
+    let mut buf = match register.named("ip") {
+        Some(ContextType::Value(NaslValue::Data(d))) => d.clone(),
         _ => {
             return Err(FunctionErrorKind::Diagnostic(
                 format!("set_ip_element: missing <ip> field"),
@@ -302,15 +294,8 @@ fn get_ip_element<K>(
     register: &Register,
     _configs: &Context<K>,
 ) -> Result<NaslValue, FunctionErrorKind> {
-    let positional = register.positional();
-    if positional.is_empty() {
-        return Err(FunctionErrorKind::Diagnostic(
-            format!("set_ip_element: missing <ip> field"),
-            Some(NaslValue::Null),
-        ));
-    }
-    let buf = match &positional[0] {
-        NaslValue::Data(d) => d.clone(),
+    let buf = match register.named("ip") {
+        Some(ContextType::Value(NaslValue::Data(d))) => d.clone(),
         _ => {
             return Err(FunctionErrorKind::Diagnostic(
                 format!("set_ip_element: missing <ip> field"),
@@ -751,9 +736,9 @@ mod tests {
                      ip_src : 192.168.0.1,
                      ip_dst : 192.168.0.12);
 
-        elem = get_ip_element(ip_packet, element: "ip_ttl");
-        ip_packet = set_ip_elements(ip_packet, ip_ttl: 127, ip_src: 192.168.0.10);
-        elem = get_ip_element(ip_packet, element: "ip_ttl");
+        elem = get_ip_element(ip: ip_packet, element: "ip_ttl");
+        ip_packet = set_ip_elements(ip: ip_packet, ip_ttl: 127, ip_src: 192.168.0.10);
+        elem = get_ip_element(ip: ip_packet, element: "ip_ttl");
         "###;
         let mut register = Register::default();
         let binding = DefaultContext::default();
