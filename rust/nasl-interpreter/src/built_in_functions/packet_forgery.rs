@@ -191,10 +191,95 @@ fn forge_ip_packet<K>(
 ///  
 /// Returns the modified IP datagram
 fn set_ip_elements<K>(
-    _register: &Register,
+    register: &Register,
     _configs: &Context<K>,
 ) -> Result<NaslValue, FunctionErrorKind> {
-    Ok(NaslValue::Null)
+    let positional = register.positional();
+    if positional.is_empty() {
+        return Err(FunctionErrorKind::Diagnostic(
+            format!("set_ip_element: missing <ip> field"),
+            Some(NaslValue::Null),
+        ));
+    }
+
+    let mut buf = match &positional[0] {
+        NaslValue::Data(d) => d.clone(),
+        _ => {
+            return Err(FunctionErrorKind::Diagnostic(
+                format!("set_ip_element: missing <ip> field"),
+                Some(NaslValue::Null),
+            ));
+        }
+    };
+
+    let mut pkt = packet::ipv4::MutableIpv4Packet::new(&mut buf).unwrap();
+
+    let ip_hl = match register.named("ip_hl") {
+        Some(ContextType::Value(NaslValue::Number(x))) => *x as u8,
+        _ => pkt.get_header_length(),
+    };
+    pkt.set_header_length(ip_hl);
+
+    let ip_v = match register.named("ip_v") {
+        Some(ContextType::Value(NaslValue::Number(x))) => *x as u8,
+        _ => pkt.get_version(),
+    };
+    pkt.set_version(ip_v);
+
+    let ip_tos = match register.named("ip_tos") {
+        Some(ContextType::Value(NaslValue::Number(x))) => *x as u8,
+        _ => pkt.get_dscp(),
+    };
+    pkt.set_dscp(ip_tos);
+
+    let ip_ttl = match register.named("ip_ttl") {
+        Some(ContextType::Value(NaslValue::Number(x))) => *x as u8,
+        _ => pkt.get_ttl(),
+    };
+    pkt.set_ttl(ip_ttl);
+
+    let ip_id = match register.named("ip_id") {
+        Some(ContextType::Value(NaslValue::Number(x))) => *x as u16,
+        _ => pkt.get_identification(),
+    };
+    pkt.set_identification(ip_id.to_be());
+
+    let ip_off = match register.named("ip_off") {
+        Some(ContextType::Value(NaslValue::Number(x))) => *x as u16,
+        _ => pkt.get_fragment_offset(),
+    };
+    pkt.set_fragment_offset(ip_off);
+
+    let ip_p = match register.named("ip_p") {
+        Some(ContextType::Value(NaslValue::Number(x))) => IpNextHeaderProtocol(*x as u8),
+        _ => pkt.get_next_level_protocol(),
+    };
+    pkt.set_next_level_protocol(ip_p);
+
+    match register.named("ip_src") {
+        Some(ContextType::Value(NaslValue::String(x))) => {
+            match x.parse::<Ipv4Addr>() {
+                Ok(ip) => {
+                    pkt.set_source(ip);
+                }
+                Err(e) => {
+                    return Err(FunctionErrorKind::Diagnostic(
+                        format!("forge_ip_packet invalid ip_src: {}", e),
+                        Some(NaslValue::Null),
+                    ));
+                }
+            };
+        }
+        _ => (),
+    };
+
+    let ip_sum = match register.named("ip_sum") {
+        Some(ContextType::Value(NaslValue::Number(x))) => (*x as u16).to_be(),
+        _ => pkt.get_checksum(),
+    };
+    pkt.set_checksum(ip_sum);
+
+    Ok(NaslValue::Data(buf))
 }
 
 /// Get an IP element from a IP datagram. It returns a data block or an integer, according to the type of the element. Its arguments are:
