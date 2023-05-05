@@ -11,7 +11,6 @@ use pnet::packet::{self, ip::IpNextHeaderProtocol, ipv4::checksum};
 
 use super::{hostname::get_host_ip, misc::random_impl};
 
-
 /// print the raw packet
 pub fn display_packet(vector: &[u8]) {
     let mut s: String = "".to_string();
@@ -576,5 +575,40 @@ pub fn lookup<K>(key: &str) -> Option<NaslFunction<K>> {
         "pcap_next" => Some(nasl_pcap_next),
         "send_capture" => Some(nasl_send_capture),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::{DefaultContext, Interpreter, NaslValue, Register};
+    use nasl_syntax::parse;
+
+    #[test]
+    fn forge_frame() {
+        let code = r###"
+        ip_packet = forge_ip_packet(ip_v : 4,
+                     ip_hl : 5,
+                     ip_tos : 0,
+                     ip_len : 20,
+                     ip_id : 1234,
+                     ip_p : 0x06,
+                     ip_ttl : 255,
+                     ip_off : 0,
+                     ip_src : 192.168.0.1,
+                     ip_dst : 192.168.0.12);
+        "###;
+        let mut register = Register::default();
+        let binding = DefaultContext::default();
+        let context = binding.as_context();
+        let mut interpreter = Interpreter::new(&mut register, &context);
+        let mut parser =
+            parse(code).map(|x| interpreter.resolve(&x.expect("no parse error expected")));
+        assert_eq!(
+            parser.next(),
+            Some(Ok(NaslValue::Data(vec![
+                69, 0, 0, 20, 210, 4, 0, 0, 255, 6, 104, 129, 192, 168, 0, 1, 192, 168, 0, 12
+            ])))
+        );
     }
 }
