@@ -30,3 +30,4 @@ aes-gcm = { version = "0.10.1"}
 cmac = "0.7.2"
 #libssh-rs = "0.1.8"
 libssh-rs = {git = "https://github.com/wez/libssh-rs.git", branch = "main"}
+socket2 = {version = "0.5.2", features = ["all"]}
