@@ -13,7 +13,11 @@ use std::{
 
 use pcap::{Address, Capture, Device};
 
-use crate::helper::ipstr2ipaddr;
+use crate::helper::{
+    ipstr2ipaddr,
+    get_source_ip,
+    get_interface_by_local_ip,
+};
 use crate::{
     context::Context, error::FunctionErrorKind, ContextType, NaslFunction, NaslValue, Register,
 };
@@ -291,82 +295,6 @@ fn get_local_mac_address(name: &str) -> Option<MacAddr> {
     match interfaces().into_iter().find(|x| x.name == *name) {
         Some(dev) => dev.mac,
         _ => None,
-    }
-}
-
-/// Get the interface from the local ip
-fn get_interface_by_local_ip(local_address: IpAddr) -> Result<Device, FunctionErrorKind> {
-    // This fake IP is used for matching (and return false)
-    // during the search of the interface in case an interface
-    // doesn't have an associated address.
-
-    let fake_ip = match local_address {
-        IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-        IpAddr::V6(_) => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-    };
-
-    let fake_addr = Address {
-        addr: fake_ip,
-        broadcast_addr: None,
-        netmask: None,
-        dst_addr: None,
-    };
-
-    let ip_match = |ip: &Address| ip.addr.eq(&local_address);
-
-    let dev = match Device::list() {
-        Ok(devices) => devices.into_iter().find(|x| {
-            local_address
-                == (x.addresses.clone().into_iter().find(ip_match))
-                    .unwrap_or_else(|| fake_addr.to_owned())
-                    .addr
-        }),
-        Err(_) => None,
-    };
-
-    match dev {
-        Some(dev) => Ok(dev),
-        _ => Err(FunctionErrorKind::Diagnostic(
-            "Invalid ip address".to_string(),
-            None,
-        )),
-    }
-}
-
-fn bind_local_socket(dst: &SocketAddr) -> Result<UdpSocket, FunctionErrorKind> {
-    let fe = Err(FunctionErrorKind::Diagnostic(
-        "Error binding".to_string(),
-        None,
-    ));
-    match dst {
-        SocketAddr::V4(_) => UdpSocket::bind("0.0.0.0:0").or(fe),
-        SocketAddr::V6(_) => UdpSocket::bind(" 0:0:0:0:0:0:0:0:0").or(fe),
-    }
-}
-
-/// Return the source IP address given the destination IP address
-fn get_source_ip(dst: IpAddr, port: u16) -> Result<IpAddr, FunctionErrorKind> {
-    let socket = SocketAddr::new(dst, port);
-    let sd = format!("{}:{}", dst, port);
-    let local_socket = bind_local_socket(&socket)?;
-    match local_socket.connect(sd) {
-        Ok(_) => match local_socket.local_addr() {
-            Ok(l_addr) => match IpAddr::from_str(&l_addr.ip().to_string()) {
-                Ok(x) => Ok(x),
-                Err(_) => Err(FunctionErrorKind::Diagnostic(
-                    "No route to destination".to_string(),
-                    None,
-                )),
-            },
-            Err(_) => Err(FunctionErrorKind::Diagnostic(
-                "No route to destination".to_string(),
-                None,
-            )),
-        },
-        Err(_) => Err(FunctionErrorKind::Diagnostic(
-            "No route to destination".to_string(),
-            None,
-        )),
     }
 }
 
