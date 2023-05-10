@@ -4,7 +4,6 @@ use std::{
     path::Path,
 };
 
-
 use crate::{
     commands::Error,
     response::{self, Response},
@@ -37,7 +36,7 @@ pub fn get_scan<T: AsRef<Path>>(address: T, scan_id: &ScanID) -> Result<response
 /// Returns the scan information from OSPD and deletes the results from it
 pub fn get_delete_scan_results<T: AsRef<Path>>(
     address: T,
-    scan_id: &ScanID,
+    scan_id: &str,
 ) -> Result<response::Scan, Error> {
     let cmd = ScanCommand::GetDelete(scan_id);
     let response = send_command(address, cmd)?;
@@ -90,8 +89,6 @@ impl From<io::Error> for Error {
 }
 #[cfg(test)]
 mod tests {
-
-
 
     // load json from path examples/discovery.json
 

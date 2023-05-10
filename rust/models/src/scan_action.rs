@@ -1,3 +1,5 @@
+use std::fmt::{Display, Formatter};
+
 /// Action to perform on a scan
 #[derive(Debug, Clone)]
 #[cfg_attr(
@@ -9,7 +11,7 @@ pub struct ScanAction {
 }
 
 /// Enum representing possible actions
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 #[cfg_attr(
     feature = "serde_support",
     derive(serde::Serialize, serde::Deserialize)
@@ -20,4 +22,13 @@ pub enum Action {
     Start,
     /// Stop a scan
     Stop,
+}
+
+impl Display for Action {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Action::Start => write!(f, "start"),
+            Action::Stop => write!(f, "stop"),
+        }
+    }
 }

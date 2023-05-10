@@ -72,6 +72,7 @@ impl Loader for NoOpLoader {
     }
 }
 
+
 impl Default for Box<dyn Loader> {
     fn default() -> Self {
         Box::<NoOpLoader>::default()

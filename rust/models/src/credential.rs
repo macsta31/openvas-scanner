@@ -1,5 +1,5 @@
 /// Represents a set of credentials to be used for scanning to access a host.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(
     feature = "serde_support",
     derive(serde::Serialize, serde::Deserialize)
@@ -15,7 +15,7 @@ pub struct Credential {
 }
 
 /// Enum of available services
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(
     feature = "serde_support",
     derive(serde::Serialize, serde::Deserialize)
@@ -36,7 +36,6 @@ pub enum Service {
 }
 
 impl AsRef<str> for Service {
-
     fn as_ref(&self) -> &str {
         match self {
             Service::SSH => "ssh",
@@ -47,7 +46,7 @@ impl AsRef<str> for Service {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(
     feature = "serde_support",
     derive(serde::Serialize, serde::Deserialize)
@@ -92,7 +91,6 @@ pub enum CredentialType {
 }
 
 impl AsRef<str> for CredentialType {
-
     fn as_ref(&self) -> &str {
         match self {
             CredentialType::UP { .. } => "up",
