@@ -2,7 +2,12 @@
 //
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-use std::{fmt::Write, net::{IpAddr, Ipv4Addr, Ipv6Addr, UdpSocket, SocketAddr}, num::ParseIntError, str::FromStr};
+use std::{
+    fmt::Write,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
+    num::ParseIntError,
+    str::FromStr,
+};
 
 use crate::{error::FunctionErrorKind, NaslValue};
 use pcap::{Address, Device};

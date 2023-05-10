@@ -6,18 +6,11 @@
 use pnet::datalink::interfaces;
 use pnet_base::MacAddr;
 use std::fmt;
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
-    str::FromStr,
-};
+use std::{net::Ipv4Addr, str::FromStr};
 
-use pcap::{Address, Capture, Device};
+use pcap::{Capture, Device};
 
-use crate::helper::{
-    ipstr2ipaddr,
-    get_source_ip,
-    get_interface_by_local_ip,
-};
+use crate::helper::{get_interface_by_local_ip, get_source_ip, ipstr2ipaddr};
 use crate::{
     context::Context, error::FunctionErrorKind, ContextType, NaslFunction, NaslValue, Register,
 };

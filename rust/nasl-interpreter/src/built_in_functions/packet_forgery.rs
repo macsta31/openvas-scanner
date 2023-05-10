@@ -4,10 +4,27 @@
 
 //! Defines NASL packet forgery functions
 
-use std::net::Ipv4Addr;
+use std::{
+    net::{Ipv4Addr, SocketAddr},
+    str::FromStr,
+};
 
-use crate::{Context, ContextType, FunctionErrorKind, NaslFunction, NaslValue, Register};
-use pnet::packet::{self, ip::IpNextHeaderProtocol, ipv4::checksum};
+use crate::{
+    helper::{get_interface_by_local_ip, get_source_ip},
+    Context, ContextType, FunctionErrorKind, NaslFunction, NaslValue, Register,
+};
+use pnet::packet::{
+    self,
+    ip::IpNextHeaderProtocol,
+    ipv4::{checksum, Ipv4OptionNumber, MutableIpv4OptionPacket},
+};
+use socket2::{Domain, Protocol, Socket};
+
+/// Default Timeout for received
+const DEFAULT_TIMEOUT: i32 = 5000;
+
+// Define IPPROTO_RAW
+const IPPROTO_RAW: i32 = 255;
 
 use super::{hostname::get_host_ip, misc::random_impl};
 
@@ -198,7 +215,7 @@ fn set_ip_elements<K>(
         Some(ContextType::Value(NaslValue::Data(d))) => d.clone(),
         _ => {
             return Err(FunctionErrorKind::Diagnostic(
-                format!("set_ip_element: missing <ip> field"),
+                "set_ip_element: missing <ip> field".to_string(),
                 Some(NaslValue::Null),
             ));
         }
@@ -248,21 +265,18 @@ fn set_ip_elements<K>(
     };
     pkt.set_next_level_protocol(ip_p);
 
-    match register.named("ip_src") {
-        Some(ContextType::Value(NaslValue::String(x))) => {
-            match x.parse::<Ipv4Addr>() {
-                Ok(ip) => {
-                    pkt.set_source(ip);
-                }
-                Err(e) => {
-                    return Err(FunctionErrorKind::Diagnostic(
-                        format!("forge_ip_packet invalid ip_src: {}", e),
-                        Some(NaslValue::Null),
-                    ));
-                }
-            };
-        }
-        _ => (),
+    if let Some(ContextType::Value(NaslValue::String(x))) = register.named("ip_src") {
+        match x.parse::<Ipv4Addr>() {
+            Ok(ip) => {
+                pkt.set_source(ip);
+            }
+            Err(e) => {
+                return Err(FunctionErrorKind::Diagnostic(
+                    format!("forge_ip_packet invalid ip_src: {}", e),
+                    Some(NaslValue::Null),
+                ));
+            }
+        };
     };
 
     let ip_sum = match register.named("ip_sum") {
@@ -298,7 +312,7 @@ fn get_ip_element<K>(
         Some(ContextType::Value(NaslValue::Data(d))) => d.clone(),
         _ => {
             return Err(FunctionErrorKind::Diagnostic(
-                format!("set_ip_element: missing <ip> field"),
+                "set_ip_element: missing <ip> field".to_string(),
                 Some(NaslValue::Null),
             ));
         }
@@ -308,26 +322,24 @@ fn get_ip_element<K>(
 
     match register.named("element") {
         Some(ContextType::Value(NaslValue::String(e))) => match e.as_str() {
-            "ip_v" => return Ok(NaslValue::Number(pkt.get_version() as i64)),
-            "ip_id" => return Ok(NaslValue::Number(pkt.get_identification() as i64)),
-            "ip_hl" => return Ok(NaslValue::Number(pkt.get_header_length() as i64)),
-            "ip_tos" => return Ok(NaslValue::Number(pkt.get_dscp() as i64)),
-            "ip_len" => return Ok(NaslValue::Number(pkt.get_total_length() as i64)),
-            "ip_off" => return Ok(NaslValue::Number(pkt.get_fragment_offset() as i64)),
-            "ip_ttl" => return Ok(NaslValue::Number(pkt.get_ttl() as i64)),
-            "ip_p" => return Ok(NaslValue::Number(pkt.get_next_level_protocol().0 as i64)),
-            "ip_sum" => return Ok(NaslValue::Number(pkt.get_checksum() as i64)),
-            "ip_src" => return Ok(NaslValue::String(pkt.get_source().to_string())),
-            "ip_dst" => return Ok(NaslValue::String(pkt.get_destination().to_string())),
-            _ => return Ok(NaslValue::Null),
+            "ip_v" => Ok(NaslValue::Number(pkt.get_version() as i64)),
+            "ip_id" => Ok(NaslValue::Number(pkt.get_identification() as i64)),
+            "ip_hl" => Ok(NaslValue::Number(pkt.get_header_length() as i64)),
+            "ip_tos" => Ok(NaslValue::Number(pkt.get_dscp() as i64)),
+            "ip_len" => Ok(NaslValue::Number(pkt.get_total_length() as i64)),
+            "ip_off" => Ok(NaslValue::Number(pkt.get_fragment_offset() as i64)),
+            "ip_ttl" => Ok(NaslValue::Number(pkt.get_ttl() as i64)),
+            "ip_p" => Ok(NaslValue::Number(pkt.get_next_level_protocol().0 as i64)),
+            "ip_sum" => Ok(NaslValue::Number(pkt.get_checksum() as i64)),
+            "ip_src" => Ok(NaslValue::String(pkt.get_source().to_string())),
+            "ip_dst" => Ok(NaslValue::String(pkt.get_destination().to_string())),
+            _ => Ok(NaslValue::Null),
         },
-        _ => {
-            return Err(FunctionErrorKind::Diagnostic(
-                format!("set_ip_element: missing <ip> field"),
-                Some(NaslValue::Null),
-            ));
-        }
-    };
+        _ => Err(FunctionErrorKind::Diagnostic(
+            "set_ip_element: missing <ip> field".to_string(),
+            Some(NaslValue::Null),
+        )),
+    }
 }
 
 /// Receive a list of IP packets and print them in a readable format in the screen.
@@ -356,6 +368,7 @@ fn dump_ip_packet<K>(
                 println!("\tip_sum  : {:?}", pkt.get_checksum());
                 println!("\tip_src : {:?}", pkt.get_source().to_string());
                 println!("\tip_dst : {:?}", pkt.get_destination().to_string());
+                display_packet(data);
             }
             _ => {
                 return Err(FunctionErrorKind::WrongArgument(
@@ -375,9 +388,33 @@ fn dump_ip_packet<K>(
 /// - length: is the length of the option data
 /// - value: is the option data
 fn insert_ip_options<K>(
-    _register: &Register,
+    register: &Register,
     _configs: &Context<K>,
 ) -> Result<NaslValue, FunctionErrorKind> {
+    let mut buf = match register.named("ip") {
+        Some(ContextType::Value(NaslValue::Data(d))) => d.clone(),
+        _ => {
+            return Err(FunctionErrorKind::Diagnostic(
+                "Usage : insert_ip_options(ip:<ip>, code:<code>, length:<len>, value:<value"
+                    .to_string(),
+                Some(NaslValue::Null),
+            ));
+        }
+    };
+
+    let mut _pkt = packet::ipv4::MutableIpv4Packet::new(&mut buf).unwrap();
+
+    let mut opt_buf = [0u8; 3];
+    let mut ipv4_options = MutableIpv4OptionPacket::new(&mut opt_buf).unwrap();
+
+    ipv4_options.set_copied(1);
+    ipv4_options.set_class(0);
+    ipv4_options.set_number(Ipv4OptionNumber(3));
+    ipv4_options.set_length(&[3]);
+    ipv4_options.set_data(&[16]);
+
+    //pkt.set_options(ipv4_options);
+
     Ok(NaslValue::Null)
 }
 
@@ -628,9 +665,117 @@ fn nasl_tcp_ping<K>(
 /// - pcap_timeout: time to wait for the answers in seconds, 5 by default
 /// - allow_broadcast: default FALSE
 fn nasl_send_packet<K>(
-    _register: &Register,
-    _configs: &Context<K>,
+    register: &Register,
+    configs: &Context<K>,
 ) -> Result<NaslValue, FunctionErrorKind> {
+    let _pcap_active = match register.named("pcap_active") {
+        Some(ContextType::Value(NaslValue::Boolean(x))) => x,
+        None => &true,
+        _ => return Err(("Boolean", "Invalid pcap_active value").into()),
+    };
+
+    let _filter = match register.named("pcap_filter") {
+        Some(ContextType::Value(NaslValue::String(x))) => Some(x),
+        None => None,
+        _ => return Err(("String", "Invalid pcap_filter value").into()),
+    };
+
+    let _timeout = match register.named("pcap_timeout") {
+        Some(ContextType::Value(NaslValue::Number(x))) => *x as i32 * 1000i32, // to milliseconds
+        None => DEFAULT_TIMEOUT,
+        _ => return Err(("Integer", "Invalid timeout value").into()),
+    };
+
+    let mut allow_broadcast = match register.named("allow_broadcast") {
+        Some(ContextType::Value(NaslValue::Boolean(x))) => *x,
+        None => false,
+        _ => return Err(("Boolean", "Invalid allow_broadcast value").into()),
+    };
+
+    let positional = register.positional();
+    if positional.is_empty() {
+        return Ok(NaslValue::Null);
+    }
+
+    let soc = match Socket::new_raw(
+        Domain::IPV4,
+        socket2::Type::RAW,
+        Some(Protocol::from(IPPROTO_RAW)),
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            return Err(FunctionErrorKind::Diagnostic(
+                format!("Not possible to create a raw socket: {}", e),
+                Some(NaslValue::Null),
+            ));
+        }
+    };
+
+    if let Err(e) = soc.set_header_included(true) {
+        return Err(FunctionErrorKind::Diagnostic(
+            format!("Not possible to create a raw socket: {}", e),
+            Some(NaslValue::Null),
+        ));
+    };
+
+    let packet_raw = match &positional[0] {
+        NaslValue::Data(data) => data as &[u8],
+        _ => return Err(("Data", "Invalid packet").into()),
+    };
+    let packet = packet::ipv4::Ipv4Packet::new(packet_raw).unwrap();
+
+    let _packet_sz = match positional[1] {
+        NaslValue::Number(sz) => sz,
+        _ => return Err(("Number", "Invalid packet size").into()),
+    };
+
+    // Get the iface name, to set the capture device.
+    let target_ip = get_host_ip(configs)?;
+    let local_ip = get_source_ip(target_ip, 50000u16)?;
+    let _iface = get_interface_by_local_ip(local_ip)?;
+
+    if allow_broadcast {
+        if let Err(err) = soc.set_broadcast(true) {
+            return Err(FunctionErrorKind::Diagnostic(
+                format!("Not possible to set broadcast soc option: {}", err),
+                Some(NaslValue::Null),
+            ));
+        }
+        // We allow broadcast, only if the dst ip inside the packet is the broadcast
+        allow_broadcast = packet.get_destination().is_broadcast();
+    }
+
+    // No broadcast destination and dst ip address inside the IP packet
+    // differs from target IP, is consider a malicious or buggy script.
+    if packet.get_destination() != target_ip && !allow_broadcast {
+        return Err(FunctionErrorKind::Diagnostic(
+            format!("send_packet: malicious or buggy script is trying to send packet to {} instead of designated target {}",
+                    packet.get_destination(), target_ip),
+            Some(NaslValue::Null),
+        ));
+    }
+
+    let sock_str = format!("{}:{}", &packet.get_destination().to_string().as_str(), 0);
+    let sockaddr = match SocketAddr::from_str(&sock_str) {
+        Ok(addr) => socket2::SockAddr::from(addr),
+        Err(e) => {
+            return Err(FunctionErrorKind::Diagnostic(
+                format!("send_packet: {}", e),
+                Some(NaslValue::Null),
+            ));
+        }
+    };
+
+    match soc.send_to(packet_raw, &sockaddr) {
+        Ok(b) => println!("Sent {} bytes", b),
+        Err(e) => {
+            return Err(FunctionErrorKind::Diagnostic(
+                format!("send_packet: {}", e),
+                Some(NaslValue::Null),
+            ));
+        }
+    }
+
     Ok(NaslValue::Null)
 }
 
@@ -695,7 +840,7 @@ mod tests {
     use nasl_syntax::parse;
 
     #[test]
-    fn forge_frame() {
+    fn forge_packet() {
         let code = r###"
         ip_packet = forge_ip_packet(ip_v : 4,
                      ip_hl : 5,
