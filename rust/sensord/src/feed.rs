@@ -5,18 +5,18 @@ use std::{
 
 use storage::StorageError::{self};
 #[derive(Debug, Default, Clone)]
-pub struct OID {
+pub struct FeedIdentifier {
     oids: Arc<RwLock<Vec<String>>>,
 }
 
-impl OID {
+impl FeedIdentifier {
     /// Get the oids from a feed
     pub fn from_feed<S>(path: S) -> Result<Vec<String>, feed::UpdateError>
     where
         S: AsRef<Path> + Clone + std::fmt::Debug + Sync + Send,
     {
         let oids = Arc::new(RwLock::new(Vec::new()));
-        let storage = OID {
+        let storage = FeedIdentifier {
             oids: Arc::clone(&oids),
         };
         tracing::debug!("getting oids from ${path:?}");
@@ -52,7 +52,7 @@ impl OID {
     }
 }
 
-impl storage::Dispatcher<String> for OID {
+impl storage::Dispatcher<String> for FeedIdentifier {
     fn dispatch(&self, _: &String, scope: storage::Field) -> Result<(), storage::StorageError> {
         use storage::nvt::NVTField::Oid;
         if let storage::Field::NVT(Oid(x)) = scope {

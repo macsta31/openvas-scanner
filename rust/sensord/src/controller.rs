@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fmt::Display,
-    sync::{Arc, RwLock},
+    sync::{Arc, RwLock}, path::PathBuf,
 };
 
 use hyper::{Body, Method, Request, Response};
@@ -27,12 +27,12 @@ impl From<std::time::Duration> for ResultContext {
 
 #[derive(Debug, Clone)]
 pub struct FeedContext {
-    path: String,
+    path: PathBuf,
     verify_interval: std::time::Duration,
 }
 
-impl From<(String, std::time::Duration)> for FeedContext {
-    fn from((path, verify_interval): (String, std::time::Duration)) -> Self {
+impl From<(PathBuf, std::time::Duration)> for FeedContext {
+    fn from((path, verify_interval): (PathBuf, std::time::Duration)) -> Self {
         Self {
             path,
             verify_interval,
@@ -42,7 +42,7 @@ impl From<(String, std::time::Duration)> for FeedContext {
 
 impl From<(&str, std::time::Duration)> for FeedContext {
     fn from((path, verify_interval): (&str, std::time::Duration)) -> Self {
-        (path.to_string(), verify_interval).into()
+        (PathBuf::from(path), verify_interval).into()
     }
 }
 
@@ -444,7 +444,7 @@ pub mod results {
 }
 
 pub mod vts {
-    use crate::feed::OID;
+    use crate::feed::FeedIdentifier;
 
     use super::*;
     pub async fn fetch<S>(ctx: Arc<Context<S>>)
@@ -460,7 +460,7 @@ pub mod vts {
                     Ok(vts) => vts.0.clone(),
                     Err(_) => quit_on_poison(),
                 };
-                let hash = match OID::sumfile_hash(&path) {
+                let hash = match FeedIdentifier::sumfile_hash(&path) {
                     Ok(h) => h,
                     Err(e) => {
                         tracing::warn!("Failed to compute sumfile hash: {e:?}");
@@ -469,7 +469,7 @@ pub mod vts {
                 };
                 if last_hash != hash {
                     tracing::debug!("VTS hash {last_hash} changed {hash}, updating");
-                    match OID::from_feed(&path) {
+                    match FeedIdentifier::from_feed(&path) {
                         Ok(o) => {
                             let mut oids = match ctx.oids.write() {
                                 Ok(oids) => oids,
@@ -497,10 +497,12 @@ macro_rules! make_svc {
         // start background service
         tokio::spawn(crate::controller::results::fetch(Arc::clone(&$controller)));
         tokio::spawn(crate::controller::vts::fetch(Arc::clone(&$controller)));
+
+        use hyper::service::{make_service_fn, service_fn};
         make_service_fn(|_conn| {
             let controller = Arc::clone($controller);
             async {
-                Ok::<_, Error>(service_fn(move |req| {
+                Ok::<_, crate::scan::Error>(service_fn(move |req| {
                     crate::controller::entrypoint(req, Arc::clone(&controller))
                 }))
             }
