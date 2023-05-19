@@ -11,5 +11,5 @@ members = [
   "feed-verifier",
   "models",
   "osp",
-  "scannerd",
+  "sensord",
 ]
