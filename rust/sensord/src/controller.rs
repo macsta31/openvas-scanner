@@ -52,6 +52,7 @@ pub struct ContextBuilder<S, T> {
     scanner: T,
     result_config: Option<ResultContext>,
     feed_config: Option<FeedContext>,
+    api_key: Option<String>,
     marker: std::marker::PhantomData<S>,
 }
 
@@ -61,6 +62,7 @@ impl<S> ContextBuilder<S, NoScanner> {
             scanner: NoScanner,
             result_config: None,
             feed_config: None,
+            api_key: None,
             marker: std::marker::PhantomData,
         }
     }
@@ -76,6 +78,11 @@ impl<S, T> ContextBuilder<S, T> {
         self.feed_config = Some(config.into());
         self
     }
+
+    pub fn api_key(mut self, api_key: impl Into<Option<String>>) -> Self {
+        self.api_key = api_key.into();
+        self
+    }
 }
 
 impl<S> ContextBuilder<S, NoScanner>
@@ -86,6 +93,7 @@ where
         let Self {
             result_config,
             feed_config,
+            api_key,
             scanner: _,
             marker: _,
         } = self;
@@ -94,6 +102,7 @@ where
             result_config,
             feed_config,
             marker: std::marker::PhantomData,
+            api_key,
         }
     }
 }
@@ -108,6 +117,7 @@ impl<S> ContextBuilder<S, Scanner<S>> {
             result_config: self.result_config,
             feed_config: self.feed_config,
             abort: Default::default(),
+            api_key: self.api_key,
         }
     }
 }
@@ -128,6 +138,8 @@ pub struct Context<S> {
     oids: RwLock<(String, Vec<String>)>,
     result_config: Option<ResultContext>,
     feed_config: Option<FeedContext>,
+    ///
+    api_key: Option<String>,
     /// Aborts the background loops
     abort: RwLock<bool>,
 }
@@ -278,6 +290,21 @@ where
     use KnownPaths::*;
     let kp = KnownPaths::from_path(req.uri().path());
     tracing::debug!("{} {}", req.method(), kp);
+    if let Some(key) = ctx.api_key.as_ref() {
+        match req.headers().get("scanner-api-key") {
+            Some(v) if v == key => {}
+            Some(v)  => {
+
+                tracing::debug!("{} {} invalid key: {:?}", req.method(), kp, v);
+                return Ok(ctx.response.unauthorized());
+            }
+            _ => {
+                tracing::debug!("{} {} unauthroized", req.method(), kp);
+                return Ok(ctx.response.unauthorized());
+            }
+        }
+    }
+
     match (req.method(), kp) {
         (&Method::HEAD, _) => Ok(ctx.response.no_content()),
         (&Method::POST, Scans(None)) => {
@@ -597,7 +624,7 @@ mod tests {
         }
     }
 
-    use crate::scan::{self, Progress};
+    use crate::scan::{Progress};
 
     use super::*;
     #[tokio::test]
@@ -767,5 +794,29 @@ mod tests {
                 break;
             }
         }
+    }
+
+
+
+    #[tokio::test]
+    async fn unauthorized() {
+        let scan: models::Scan = models::Scan::default();
+        let ctx = ContextBuilder::new()
+            .api_key(Some("mtls_is_prefered".to_string()))
+            .scanner(NoOpScanner::default())
+            .build();
+        let controller = Arc::new(ctx);
+        let resp = post_scan(&scan, Arc::clone(&controller)).await;
+        assert_eq!(resp.status(), 401);
+        let req = Request::builder()
+            .uri("/scans")
+            .header("SCANNER-API-KEY", "mtls_is_prefered")
+            .method(Method::POST)
+            .body(serde_json::to_string(&scan).unwrap().into())
+            .unwrap();
+        let resp = entrypoint(req, Arc::clone(&controller)).await.unwrap();
+        assert_eq!(resp.status(), 201);
+
+
     }
 }

@@ -26,6 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .result_config(rc)
         .feed_config(fc)
         .scanner(scanner)
+        .api_key(config.endpoints.key.clone())
         .build();
     let controller = Arc::new(ctx);
     let addr = config.listener.address;

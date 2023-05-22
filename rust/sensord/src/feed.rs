@@ -1,5 +1,5 @@
 use std::{
-    path::{Path},
+    path::Path,
     sync::{Arc, RwLock},
 };
 

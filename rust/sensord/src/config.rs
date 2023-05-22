@@ -51,13 +51,12 @@ impl Default for Listener {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
-#[derive(Default)]
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct Endpoints {
     pub enable_get_scans: bool,
+    #[serde(default)]
+    pub key: Option<String>,
 }
-
-
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Tls {
@@ -180,6 +179,13 @@ impl Config {
                     .help("enable get scans endpoint"),
             )
             .arg(
+                clap::Arg::new("api-key")
+                    .env("API_KEY")
+                    .long("api-key")
+                    .action(ArgAction::Set)
+                    .help("API key that must be set as SCANNER-API-KEY header to gain access"),
+            )
+            .arg(
                 clap::Arg::new("ospd-socket")
                     .env("OSPD_SOCKET")
                     .long("ospd-socket")
@@ -238,6 +244,9 @@ impl Config {
         }
         if let Some(enable) = cmds.get_one::<bool>("enable-get-scans") {
             config.endpoints.enable_get_scans = *enable;
+        }
+        if let Some(api_key) = cmds.get_one::<String>("api-key") {
+            config.endpoints.key = Some(api_key.clone());
         }
         if let Some(ip) = cmds.get_one::<SocketAddr>("binding-ip") {
             config.listener.address = *ip;

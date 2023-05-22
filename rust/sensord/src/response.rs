@@ -72,6 +72,10 @@ impl Response {
         self.empty(hyper::StatusCode::NO_CONTENT)
     }
 
+    pub fn unauthorized(&self) -> Result {
+        self.empty(hyper::StatusCode::UNAUTHORIZED)
+    }
+
     pub fn internal_server_error(&self, err: &dyn Error) -> Result {
         tracing::error!("Unexpected error: {}", err);
         self.empty(hyper::StatusCode::INTERNAL_SERVER_ERROR)
@@ -84,10 +88,7 @@ impl Response {
             id: &'a str,
         }
 
-        let value = NotFound {
-            class,
-            id,
-        };
+        let value = NotFound { class, id };
         tracing::trace!("{:?}", value);
         self.create(hyper::StatusCode::NOT_FOUND, &value)
     }

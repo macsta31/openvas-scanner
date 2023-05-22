@@ -3,7 +3,7 @@ use std::io::{self, Cursor};
 use models::Scan;
 use quick_xml::events::{attributes::Attribute, BytesEnd, BytesStart, BytesText, Event};
 
-use crate::{response::Status};
+use crate::response::Status;
 
 /// OSP Command
 pub enum ScanCommand<'a> {

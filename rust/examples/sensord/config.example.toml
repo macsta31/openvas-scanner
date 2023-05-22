@@ -7,6 +7,7 @@ nanos = 0
 
 [endpoints]
 enable_get_scans = false
+key = "mtls_is_prefered"
 
 [tls]
 certs = "/etc/sensord/tls/certs.pem"

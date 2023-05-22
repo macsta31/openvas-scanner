@@ -146,11 +146,7 @@ pub fn tls_config(
                         "client certs found, starting with certificate based client auth"
                     );
                     let mut client_auth_roots = RootCertStore::empty();
-                    for root in client_certs
-                        .iter()
-                        .flat_map(load_certs)
-                        .flatten()
-                    {
+                    for root in client_certs.iter().flat_map(load_certs).flatten() {
                         client_auth_roots.add(&root)?;
                     }
                     AllowAnyAuthenticatedClient::new(client_auth_roots).boxed()

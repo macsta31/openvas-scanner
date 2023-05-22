@@ -22,7 +22,6 @@ pub enum Error {
     Poisoned,
 }
 
-
 impl std::error::Error for Error {}
 
 impl std::fmt::Display for Error {
@@ -30,7 +29,6 @@ impl std::fmt::Display for Error {
         write!(f, "{:?}", self)
     }
 }
-
 
 impl<T> From<PoisonError<T>> for Error {
     fn from(_: PoisonError<T>) -> Self {
@@ -107,8 +105,6 @@ impl ScanResultFetcher for OSPDWrapper {
     }
 }
 
-
-
 #[derive(Clone, Debug, Default)]
 /// Contains the progress of a scan.
 ///
@@ -137,7 +133,6 @@ impl Progress {
             Some(s) => s,
             None => "",
         }
-
     }
 }
 
@@ -150,4 +145,3 @@ impl From<models::Scan> for Progress {
         }
     }
 }
-
