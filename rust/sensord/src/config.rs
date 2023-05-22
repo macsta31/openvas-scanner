@@ -257,7 +257,7 @@ mod tests {
             config.feed.path,
             std::path::PathBuf::from("/var/lib/openvas/plugins")
         );
-        assert!(config.endpoints.enable_get_scans);
+        assert!(!config.endpoints.enable_get_scans);
         assert_eq!(
             config.tls.certs,
             std::path::PathBuf::from("/etc/sensord/tls/certs.pem")

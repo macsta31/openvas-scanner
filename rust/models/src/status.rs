@@ -42,7 +42,7 @@ impl Status {
 }
 
 /// Enum of the possible phases of a scan
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(
     feature = "serde_support",
     derive(serde::Serialize, serde::Deserialize)

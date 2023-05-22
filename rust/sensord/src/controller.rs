@@ -1,7 +1,8 @@
 use std::{
     collections::HashMap,
     fmt::Display,
-    sync::{Arc, RwLock}, path::PathBuf,
+    path::PathBuf,
+    sync::{Arc, RwLock},
 };
 
 use hyper::{Body, Method, Request, Response};
@@ -106,6 +107,7 @@ impl<S> ContextBuilder<S, Scanner<S>> {
             oids: Default::default(),
             result_config: self.result_config,
             feed_config: self.feed_config,
+            abort: Default::default(),
         }
     }
 }
@@ -126,6 +128,8 @@ pub struct Context<S> {
     oids: RwLock<(String, Vec<String>)>,
     result_config: Option<ResultContext>,
     feed_config: Option<FeedContext>,
+    /// Aborts the background loops
+    abort: RwLock<bool>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -150,10 +154,7 @@ impl ScanDeleter for NoOpScanner {
 }
 
 impl ScanResultFetcher for NoOpScanner {
-    fn fetch_results(
-        &self,
-        _: &crate::scan::Progress,
-    ) -> Result<crate::scan::FetchResult, Error> {
+    fn fetch_results(&self, _: &crate::scan::Progress) -> Result<crate::scan::FetchResult, Error> {
         Ok(Default::default())
     }
 }
@@ -268,6 +269,7 @@ pub async fn entrypoint<'a, S>(
 where
     S: ScanStarter
         + ScanStopper
+        + ScanDeleter
         + std::marker::Send
         + 'static
         + std::marker::Sync
@@ -373,6 +375,7 @@ where
                         if s.status.is_running() {
                             ctx.scanner.stop_scan(&s)?;
                         }
+                        ctx.scanner.delete_scan(&s)?;
                         Ok(ctx.response.no_content())
                     }
                     None => Ok(ctx.response.not_found("scans", &id)),
@@ -407,6 +410,10 @@ pub mod results {
             let interval = cfg.0;
             tracing::debug!("Starting synchronization loop");
             tokio::task::spawn_blocking(move || loop {
+                if *ctx.abort.read().unwrap() {
+                    tracing::trace!("aborting");
+                    break;
+                }
                 let ls = match ctx.scans.read() {
                     Ok(ls) => ls,
                     Err(_) => quit_on_poison(),
@@ -456,6 +463,10 @@ pub mod vts {
             let path = cfg.path.clone();
             tracing::debug!("Starting VTS synchronization loop");
             tokio::task::spawn_blocking(move || loop {
+                if *ctx.abort.read().unwrap() {
+                    tracing::trace!("aborting");
+                    break;
+                }
                 let last_hash = match ctx.oids.read() {
                     Ok(vts) => vts.0.clone(),
                     Err(_) => quit_on_poison(),
@@ -475,7 +486,11 @@ pub mod vts {
                                 Ok(oids) => oids,
                                 Err(_) => quit_on_poison(),
                             };
-                            tracing::trace!("VTS hash changed updated (old: {}, new: {})", oids.1.len(), o.len());
+                            tracing::trace!(
+                                "VTS hash changed updated (old: {}, new: {})",
+                                oids.1.len(),
+                                o.len()
+                            );
                             *oids = (hash, o);
                         }
                         Err(e) => {
@@ -511,3 +526,246 @@ macro_rules! make_svc {
 }
 
 pub(crate) use make_svc;
+
+#[cfg(test)]
+mod tests {
+    use hyper::{Body, Method, Request};
+
+    #[derive(Debug, Clone)]
+    struct FakeScanner {
+        count: Arc<RwLock<usize>>,
+    }
+
+    impl crate::scan::ScanStarter for FakeScanner {
+        fn start_scan(&self, _scan: &Progress) -> Result<(), crate::scan::Error> {
+            Ok(())
+        }
+    }
+
+    impl crate::scan::ScanStopper for FakeScanner {
+        fn stop_scan(&self, _scan: &Progress) -> Result<(), crate::scan::Error> {
+            Ok(())
+        }
+    }
+
+    impl crate::scan::ScanDeleter for FakeScanner {
+        fn delete_scan(&self, _scan: &Progress) -> Result<(), crate::scan::Error> {
+            Ok(())
+        }
+    }
+
+    impl crate::scan::ScanResultFetcher for FakeScanner {
+        fn fetch_results(
+            &self,
+            prgrs: &crate::scan::Progress,
+        ) -> Result<crate::scan::FetchResult, crate::scan::Error> {
+            let mut count = self.count.write().unwrap();
+            match *count {
+                0 => {
+                    let status = models::Status {
+                        status: models::Phase::Requested,
+                        ..Default::default()
+                    };
+                    *count += 1;
+                    Ok((status, vec![]))
+                }
+                1..=99 => {
+                    let status = models::Status {
+                        status: models::Phase::Running,
+                        ..Default::default()
+                    };
+                    let mut results = vec![];
+                    for i in 0..*count {
+                        results.push(models::Result {
+                            id: prgrs.results.len() + i,
+                            message: Some(uuid::Uuid::new_v4().to_string()),
+                            ..Default::default()
+                        });
+                    }
+                    *count += 1;
+                    Ok((status, results))
+                }
+                _ => {
+                    *count += 1;
+                    let status = models::Status {
+                        status: models::Phase::Succeeded,
+                        ..Default::default()
+                    };
+                    Ok((status, vec![]))
+                }
+            }
+        }
+    }
+
+    use crate::scan::{self, Progress};
+
+    use super::*;
+    #[tokio::test]
+    async fn contains_version() {
+        let controller = Arc::new(Context::default());
+        let req = Request::builder()
+            .method(Method::HEAD)
+            .body(Body::empty())
+            .unwrap();
+        let resp = entrypoint(req, Arc::clone(&controller)).await.unwrap();
+        assert_eq!(resp.headers().get("version").unwrap(), "");
+        assert_eq!(resp.headers().get("authentication").unwrap(), "");
+    }
+    async fn get_scan_status<S>(id: &str, ctx: Arc<Context<S>>) -> Response<Body>
+    where
+        S: ScanStarter
+            + ScanStopper
+            + ScanDeleter
+            + std::marker::Send
+            + 'static
+            + std::marker::Sync
+            + std::fmt::Debug,
+    {
+        let req = Request::builder()
+            .uri(format!("/scans/{id}/status", id = id))
+            .method(Method::GET)
+            .body(Body::empty())
+            .unwrap();
+        entrypoint(req, Arc::clone(&ctx)).await.unwrap()
+    }
+
+    async fn get_scan<S>(id: &str, ctx: Arc<Context<S>>) -> Response<Body>
+    where
+        S: ScanStarter
+            + ScanStopper
+            + ScanDeleter
+            + std::marker::Send
+            + 'static
+            + std::marker::Sync
+            + std::fmt::Debug,
+    {
+        let req = Request::builder()
+            .uri(format!("/scans/{id}", id = id))
+            .method(Method::GET)
+            .body(Body::empty())
+            .unwrap();
+        entrypoint(req, Arc::clone(&ctx)).await.unwrap()
+    }
+
+    async fn post_scan<S>(scan: &models::Scan, ctx: Arc<Context<S>>) -> Response<Body>
+    where
+        S: ScanStarter
+            + ScanStopper
+            + ScanDeleter
+            + std::marker::Send
+            + 'static
+            + std::marker::Sync
+            + std::fmt::Debug,
+    {
+        let req = Request::builder()
+            .uri("/scans")
+            .method(Method::POST)
+            .body(serde_json::to_string(&scan).unwrap().into())
+            .unwrap();
+        entrypoint(req, Arc::clone(&ctx)).await.unwrap()
+    }
+
+    async fn start_scan<S>(id: &str, ctx: Arc<Context<S>>) -> Response<Body>
+    where
+        S: ScanStarter
+            + ScanStopper
+            + ScanDeleter
+            + std::marker::Send
+            + 'static
+            + std::marker::Sync
+            + std::fmt::Debug,
+    {
+        let action = &models::ScanAction {
+            action: models::Action::Start,
+        };
+        let req = Request::builder()
+            .uri(format!("/scans/{id}", id = id))
+            .method(Method::POST)
+            .body(serde_json::to_string(action).unwrap().into())
+            .unwrap();
+        entrypoint(req, Arc::clone(&ctx)).await.unwrap()
+    }
+
+    async fn post_scan_id<S>(scan: &models::Scan, ctx: Arc<Context<S>>) -> String
+    where
+        S: ScanStarter
+            + ScanStopper
+            + ScanDeleter
+            + std::marker::Send
+            + 'static
+            + std::marker::Sync
+            + std::fmt::Debug,
+    {
+        let resp = post_scan(scan, Arc::clone(&ctx)).await;
+        let resp = hyper::body::to_bytes(resp.into_body()).await.unwrap();
+        let resp = String::from_utf8(resp.to_vec()).unwrap();
+        let id = resp.trim_matches('"');
+        id.to_string()
+    }
+
+    #[tokio::test]
+    async fn add_scan() {
+        let scan: models::Scan = models::Scan::default();
+        let controller = Arc::new(Context::default());
+        let id = post_scan_id(&scan, Arc::clone(&controller)).await;
+        let resp = get_scan(&id, Arc::clone(&controller)).await;
+        let resp = hyper::body::to_bytes(resp.into_body()).await.unwrap();
+
+        let resp = serde_json::from_slice::<models::Scan>(&resp).unwrap();
+
+        let scan: models::Scan = models::Scan {
+            scan_id: Some(id.to_string()),
+            ..Default::default()
+        };
+        assert_eq!(resp, scan);
+    }
+
+    #[tokio::test]
+    async fn delete_scan() {
+        let scan: models::Scan = models::Scan::default();
+        let controller = Arc::new(Context::default());
+        let id = post_scan_id(&scan, Arc::clone(&controller)).await;
+        let resp = get_scan(&id, Arc::clone(&controller)).await;
+        assert_eq!(resp.status(), 200);
+        let req = Request::builder()
+            .uri(format!("/scans/{id}"))
+            .method(Method::DELETE)
+            .body(Body::empty())
+            .unwrap();
+        entrypoint(req, Arc::clone(&controller)).await.unwrap();
+        let resp = get_scan(&id, Arc::clone(&controller)).await;
+        assert_eq!(resp.status(), 404);
+    }
+
+    #[tokio::test]
+    async fn fetch_results() {
+        let scan: models::Scan = models::Scan::default();
+        let scanner = FakeScanner {
+            count: Arc::new(RwLock::new(0)),
+        };
+        let ns = std::time::Duration::from_nanos(10);
+        let ctx = ContextBuilder::new()
+            .result_config(ns)
+            .scanner(scanner)
+            .build();
+        let controller = Arc::new(ctx);
+
+        tokio::spawn(crate::controller::results::fetch(Arc::clone(&controller)));
+        let id = post_scan_id(&scan, Arc::clone(&controller)).await;
+        let resp = start_scan(&id, Arc::clone(&controller)).await;
+        assert_eq!(resp.status(), 204);
+        loop {
+            let resp = get_scan_status(&id, Arc::clone(&controller)).await;
+            assert_eq!(resp.status(), 200);
+
+            let resp = hyper::body::to_bytes(resp.into_body()).await.unwrap();
+            let resp = serde_json::from_slice::<models::Status>(&resp).unwrap();
+            // would run into an endlessloop if the scan would never finish
+            if resp.status == models::Phase::Succeeded {
+                let mut abort = Arc::as_ref(&controller).abort.write().unwrap();
+                *abort = true;
+                break;
+            }
+        }
+    }
+}
